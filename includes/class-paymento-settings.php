@@ -75,8 +75,8 @@ final class Paymento_GiveWP_Settings {
 
     public static function save(): void {
         self::authorize('paymento_givewp_save');
-        $key = trim((string) wp_unslash($_POST['api_key'] ?? ''));
-        $secret = trim((string) wp_unslash($_POST['ipn_secret'] ?? ''));
+        $key = sanitize_text_field(wp_unslash($_POST['api_key'] ?? '')); // phpcs:ignore WordPress.Security.NonceVerification.Missing -- nonce checked in authorize().
+        $secret = sanitize_text_field(wp_unslash($_POST['ipn_secret'] ?? '')); // phpcs:ignore WordPress.Security.NonceVerification.Missing -- nonce checked in authorize().
         try {
             if ($key === '' && $secret === '') { wp_safe_redirect(admin_url('options-general.php?page=paymento-givewp')); exit; }
             if ($key === '' || $secret === '' || strlen($key) > 512 || strlen($secret) > 512) { throw new RuntimeException('Both credentials are required.'); }
@@ -89,7 +89,7 @@ final class Paymento_GiveWP_Settings {
 
     public static function callback(): void {
         self::authorize('paymento_givewp_callback');
-        if (($_POST['dedicated_store'] ?? '') !== 'yes') { wp_die('Confirm a dedicated Paymento store.', '', ['response' => 400]); }
+        if (sanitize_key(wp_unslash($_POST['dedicated_store'] ?? '')) !== 'yes') { wp_die('Confirm a dedicated Paymento store.', '', ['response' => 400]); } // phpcs:ignore WordPress.Security.NonceVerification.Missing -- nonce checked in authorize().
         $url = rest_url('paymento-givewp/v1/ipn');
         if (wp_parse_url($url, PHP_URL_SCHEME) !== 'https') { wp_die('A public HTTPS callback URL is required.', '', ['response' => 400]); }
         try { self::configure_callback($url); }
@@ -112,8 +112,8 @@ final class Paymento_GiveWP_Settings {
         $configured = false;
         try { self::current(); $configured = true; } catch (Throwable $error) {}
         global $wpdb;
-        $pending = (int) $wpdb->get_var('SELECT COUNT(*) FROM ' . $wpdb->prefix . 'paymento_givewp_inbox WHERE processed IS NULL');
-        $review = $wpdb->get_results('SELECT donation_id,review_code FROM ' . $wpdb->prefix . "paymento_givewp_donations WHERE review_code<>'' ORDER BY donation_id DESC LIMIT 30", ARRAY_A);
+        $pending = (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM %i WHERE processed IS NULL', Paymento_GiveWP::table('inbox')));
+        $review = $wpdb->get_results($wpdb->prepare("SELECT donation_id,review_code FROM %i WHERE review_code<>'' ORDER BY donation_id DESC LIMIT 30", Paymento_GiveWP::table('donations')), ARRAY_A);
         echo '<div class="wrap"><h1>Paymento for GiveWP</h1><p>Credentials: ' . ($configured ? 'configured' : 'missing') . '. Pending receipts: ' . esc_html((string) $pending) . '.</p>';
         echo '<p>One-time donations only. Enable Paymento separately for modern and legacy forms in GiveWP payment settings. Configure a real cron worker; visitor traffic is not a reliable worker.</p>';
         echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '"><input type="hidden" name="action" value="paymento_givewp_save">';

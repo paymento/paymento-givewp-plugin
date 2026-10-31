@@ -5,7 +5,7 @@
  * Plugin URI: https://github.com/paymento/paymento-givewp-plugin
  * Author: Paymento
  * Author URI: https://paymento.io
- * Version: 0.1.0
+ * Version: 0.1.1
  * Requires at least: 6.9
  * Requires PHP: 8.2
  * Requires Plugins: give

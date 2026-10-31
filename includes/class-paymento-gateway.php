@@ -11,7 +11,7 @@ final class Paymento_GiveWP_Gateway extends PaymentGateway {
     public function getPaymentMethodLabel(): string { return 'Crypto by Paymento'; }
     public function supportsSubscriptions(): bool { return false; }
     public function enqueueScript(int $formId) {
-        wp_enqueue_script('paymento-givewp-gateway', plugins_url('assets/gateway.js', PAYMENTO_GIVEWP_FILE), ['givewp-donation-form-registrars', 'wp-element'], '0.1.0', true);
+        wp_enqueue_script('paymento-givewp-gateway', plugins_url('assets/gateway.js', PAYMENTO_GIVEWP_FILE), ['givewp-donation-form-registrars', 'wp-element'], '0.1.1', true);
     }
     public function formSettings(int $formId): array { return ['notice' => 'Continue to Paymento to pay your donation using cryptocurrency.']; }
     public function getLegacyFormFieldMarkup(int $formId, array $args): string { return '<p class="paymento-gateway-notice">Continue to Paymento to pay your donation using cryptocurrency.</p>'; }

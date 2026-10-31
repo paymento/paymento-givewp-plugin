@@ -2,10 +2,10 @@
 Contributors: paymento
 Tags: givewp, donations, cryptocurrency, crypto, payment gateway
 Requires at least: 6.9
-Tested up to: 7.1.3
+Tested up to: 7.1
 Requires PHP: 8.2
 Requires Plugins: give
-Stable tag: 0.1.0
+Stable tag: 0.1.1
 License: GPLv3 or later
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
 
@@ -61,6 +61,9 @@ Occasionally a donation needs a human look. For example, a donor might pay twice
 The background task stops, and your payment records are kept. Remove the cron task as well.
 
 == Changelog ==
+
+= 0.1.1 =
+* WordPress.org Plugin Check fixes: prepared table names and sanitized settings input.
 
 = 0.1.0 =
 * First public release: one-time crypto donations, verified payment confirmation and refund updates.

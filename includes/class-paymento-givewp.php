@@ -82,7 +82,7 @@ final class Paymento_GiveWP {
 ) ENGINE=InnoDB $collate;");
         $required = ['attempts' => ['id', 'donation_id', 'identity_hash', 'token', 'terminal_status', 'refunded', 'return_key', 'credential_ref', 'success_url', 'receipt_url', 'cancel_url'], 'inbox' => ['id', 'attempt_id', 'payload', 'verified', 'processed', 'retries', 'next_attempt', 'last_error'], 'donations' => ['donation_id', 'winner_attempt', 'terminal_refund', 'transition_kind', 'transition_phase', 'review_code']];
         foreach ($required as $table => $columns) {
-            foreach ($columns as $column) { if (!$wpdb->get_var($wpdb->prepare('SHOW COLUMNS FROM ' . self::table($table) . ' LIKE %s', $column))) { throw new RuntimeException('schema_install_failed'); } }
+            foreach ($columns as $column) { if (!$wpdb->get_var($wpdb->prepare('SHOW COLUMNS FROM %i LIKE %s', self::table($table), $column))) { throw new RuntimeException('schema_install_failed'); } }
         }
         if (!update_option('paymento_givewp_schema', 3, false) && (int) get_option('paymento_givewp_schema') !== 3) { throw new RuntimeException('schema_version_storage_failed'); }
         if (!wp_next_scheduled('paymento_givewp_retry')) { wp_schedule_event(time() + 60, 'paymento_givewp_minute', 'paymento_givewp_retry'); }
@@ -107,8 +107,8 @@ final class Paymento_GiveWP {
     private function update(string $table, array $values, array $where): void { global $wpdb; if ($wpdb->update(self::table($table), $values, $where) === false) { throw new RuntimeException('storage_update_failed'); } }
     private function ledger(int $id): array {
         global $wpdb;
-        if ($wpdb->query($wpdb->prepare('INSERT IGNORE INTO ' . self::table('donations') . ' (donation_id) VALUES (%d)', $id)) === false) { throw new RuntimeException('ledger_storage_failed'); }
-        $row = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . self::table('donations') . ' WHERE donation_id=%d', $id), ARRAY_A);
+        if ($wpdb->query($wpdb->prepare('INSERT IGNORE INTO %i (donation_id) VALUES (%d)', self::table('donations'), $id)) === false) { throw new RuntimeException('ledger_storage_failed'); }
+        $row = $wpdb->get_row($wpdb->prepare('SELECT * FROM %i WHERE donation_id=%d', self::table('donations'), $id), ARRAY_A);
         if (!$row) { throw new RuntimeException('ledger_storage_failed'); } return $row;
     }
 
@@ -139,7 +139,7 @@ final class Paymento_GiveWP {
             $donation = Donation::find($donation->id); if (!$donation) { throw new RuntimeException('native_donation_missing'); }
             $this->assert_native($donation); $ledger = $this->ledger($donation->id);
             if ($ledger['terminal_refund'] || $ledger['winner_attempt'] || $donation->status->getValue() !== 'pending') { throw new RuntimeException('native_donation_not_pending'); }
-            $previous = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . self::table('attempts') . ' WHERE donation_id=%d AND token IS NOT NULL AND refunded=0 AND terminal_status NOT IN (4,5,9,10) ORDER BY id DESC LIMIT 1', $donation->id), ARRAY_A);
+            $previous = $wpdb->get_row($wpdb->prepare('SELECT * FROM %i WHERE donation_id=%d AND token IS NOT NULL AND refunded=0 AND terminal_status NOT IN (4,5,9,10) ORDER BY id DESC LIMIT 1', self::table('attempts'), $donation->id), ARRAY_A);
             if ($previous && !$force) { $this->assert_native($donation, $previous); return $this->result($previous); }
             $config = Paymento_GiveWP_Settings::current(); Paymento_GiveWP_Settings::archive($config);
             $isVisual = Give\Helpers\Form\Utils::isV3Form($donation->formId);
@@ -156,7 +156,7 @@ final class Paymento_GiveWP {
             $token = $response['body'] ?? null;
             if (!is_string($token) || $token === '' || strlen($token) > 255 || preg_match('/[\x00-\x20]/', $token)) { throw new RuntimeException('paymento_token_invalid'); }
             $this->update('attempts', ['token' => $token], ['id' => $id]);
-            $saved = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . self::table('attempts') . ' WHERE id=%d', $id), ARRAY_A);
+            $saved = $wpdb->get_row($wpdb->prepare('SELECT * FROM %i WHERE id=%d', self::table('attempts'), $id), ARRAY_A);
             if (!$saved || $saved['token'] !== $token) { throw new RuntimeException('token_storage_failed'); }
             return $this->result($saved);
         } finally { $this->unlock($lock); }
@@ -173,7 +173,7 @@ final class Paymento_GiveWP {
         if (!$matched) { return new WP_REST_Response(['error' => 'invalid_signature'], 401); }
         $data = json_decode($raw, true);
         if (!is_array($data) || !is_string($data['Token'] ?? null) || !is_string($data['OrderId'] ?? null)) { return new WP_REST_Response(['error' => 'invalid_payload'], 400); }
-        $attempt = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . self::table('attempts') . ' WHERE token=%s', $data['Token']), ARRAY_A);
+        $attempt = $wpdb->get_row($wpdb->prepare('SELECT * FROM %i WHERE token=%s', self::table('attempts'), $data['Token']), ARRAY_A);
         if (!$attempt || !hash_equals($attempt['token'], $data['Token']) || !hash_equals($attempt['external_id'], $data['OrderId']) || !in_array($attempt['credential_ref'], $matched, true)) { return new WP_REST_Response(['error' => 'unknown_payment'], 404); }
         if (!$wpdb->insert(self::table('inbox'), ['attempt_id' => $attempt['id'], 'payload' => $raw, 'received' => time()])) { return new WP_REST_Response(['error' => 'storage_unavailable'], 503); }
         return new WP_REST_Response(['received' => true], 200);
@@ -189,13 +189,13 @@ final class Paymento_GiveWP {
 
     public function process_row(int $id): void {
         self::maybe_upgrade(); global $wpdb;
-        $row = $wpdb->get_row($wpdb->prepare('SELECT i.*,a.donation_id FROM ' . self::table('inbox') . ' i JOIN ' . self::table('attempts') . ' a ON a.id=i.attempt_id WHERE i.id=%d', $id), ARRAY_A);
+        $row = $wpdb->get_row($wpdb->prepare('SELECT i.*,a.donation_id FROM %i i JOIN %i a ON a.id=i.attempt_id WHERE i.id=%d', self::table('inbox'), self::table('attempts'), $id), ARRAY_A);
         if (!$row || $row['processed'] !== null) { return; }
         $lock = $this->parent_lock_name((int) $row['donation_id']); if (!$this->lock($lock)) { return; }
         try {
-            $row = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . self::table('inbox') . ' WHERE id=%d', $id), ARRAY_A);
+            $row = $wpdb->get_row($wpdb->prepare('SELECT * FROM %i WHERE id=%d', self::table('inbox'), $id), ARRAY_A);
             if (!$row || $row['processed'] !== null) { return; }
-            $attempt = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . self::table('attempts') . ' WHERE id=%d', $row['attempt_id']), ARRAY_A);
+            $attempt = $wpdb->get_row($wpdb->prepare('SELECT * FROM %i WHERE id=%d', self::table('attempts'), $row['attempt_id']), ARRAY_A);
             $donation = Donation::find((int) $attempt['donation_id']); if (!$donation) { throw new RuntimeException('native_donation_missing'); }
             $ledger = $this->ledger($donation->id); $this->assert_native($donation, $attempt);
             $nativeStatus = $donation->status->getValue();
@@ -244,7 +244,7 @@ final class Paymento_GiveWP {
             if (isset($attempt['id'], $attempt['donation_id'])) {
                 try {
                     $fresh = Donation::find((int) $attempt['donation_id']);
-                    $intent = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . self::table('donations') . ' WHERE donation_id=%d', $attempt['donation_id']), ARRAY_A);
+                    $intent = $wpdb->get_row($wpdb->prepare('SELECT * FROM %i WHERE donation_id=%d', self::table('donations'), $attempt['donation_id']), ARRAY_A);
                     if ($fresh && $intent && $intent['transition_phase'] === 'started' && in_array($fresh->status->getValue(), ['publish', 'refunded'], true) && $fresh->gatewayTransactionId === 'paymento-givewp-' . $attempt['id']) {
                         $wpdb->update(self::table('donations'), ['review_code' => 'native_lifecycle_uncertain'], ['donation_id' => $attempt['donation_id']]);
                     }
@@ -306,19 +306,18 @@ final class Paymento_GiveWP {
     public function process_inbox(bool $force = false): void {
         if (!class_exists(Donation::class)) { return; }
         self::maybe_upgrade(); global $wpdb;
-        $where = $force ? '' : $wpdb->prepare(' AND next_attempt<=%d', time());
-        $ids = $wpdb->get_col('SELECT id FROM ' . self::table('inbox') . ' WHERE processed IS NULL' . $where . ' ORDER BY retries ASC,id ASC LIMIT 50');
+        $ids = $wpdb->get_col($wpdb->prepare('SELECT id FROM %i WHERE processed IS NULL AND next_attempt<=%d ORDER BY retries ASC,id ASC LIMIT 50', self::table('inbox'), $force ? PHP_INT_MAX : time()));
         $started = microtime(true);
         foreach ($ids as $id) { if (microtime(true) - $started > 20) { break; } $this->process_row((int) $id); }
     }
 
     public function return_page(WP_REST_Request $request): WP_REST_Response {
         global $wpdb;
-        $attempt = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . self::table('attempts') . ' WHERE id=%d', absint($request['attempt'])), ARRAY_A);
+        $attempt = $wpdb->get_row($wpdb->prepare('SELECT * FROM %i WHERE id=%d', self::table('attempts'), absint($request['attempt'])), ARRAY_A);
         $key = (string) ($request['key'] ?? '');
         if (!$attempt || strlen($key) !== 64 || !hash_equals($attempt['return_key'], $key)) { return new WP_REST_Response(['error' => 'not_found'], 404); }
         $donation = Donation::find((int) $attempt['donation_id']);
-        $ledger = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . self::table('donations') . ' WHERE donation_id=%d', $attempt['donation_id']), ARRAY_A) ?: ['terminal_refund' => 0, 'review_code' => ''];
+        $ledger = $wpdb->get_row($wpdb->prepare('SELECT * FROM %i WHERE donation_id=%d', self::table('donations'), $attempt['donation_id']), ARRAY_A) ?: ['terminal_refund' => 0, 'review_code' => ''];
         $uncertain = ($ledger['transition_phase'] ?? '') === 'started' && $donation && in_array($donation->status->getValue(), ['publish', 'refunded'], true);
         $state = $ledger['review_code'] !== '' || $uncertain ? 'merchant_review' : ($ledger['terminal_refund'] ? 'refunded' : ($donation && $donation->status->getValue() === 'publish' ? 'confirmed' : 'pending'));
         $response = new WP_REST_Response(['state' => $state, 'receipt_url' => $this->native_url($attempt['receipt_url'] ?: $attempt['success_url']), 'cancel_url' => $this->native_url($attempt['cancel_url'])], 200);
